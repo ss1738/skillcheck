@@ -1,0 +1,18 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc = "0.8.26"
+evm_version = "cancun"
+auto_detect_remappings = false
+remappings = [
+  "v4-core/=lib/uniswap-hooks/lib/v4-core/",
+  "@uniswap/v4-core/=lib/uniswap-hooks/lib/v4-core/",
+  "v4-periphery/=lib/v4-periphery/",
+  "@uniswap/v4-periphery/=lib/v4-periphery/",
+  "@openzeppelin/uniswap-hooks/=lib/uniswap-hooks/",
+  "@openzeppelin/contracts/=lib/uniswap-hooks/lib/openzeppelin-contracts/contracts/",
+  "forge-std/=lib/forge-std/src/",
+  "solmate/=lib/uniswap-hooks/lib/v4-core/lib/solmate/",
+  "permit2/=lib/v4-periphery/lib/permit2/",
+]

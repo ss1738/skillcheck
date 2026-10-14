@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skillcheck"
+version = "0.1.0"
+description = "Deterministic (no LLM) checks of claims and code samples in agent-skill and docs markdown against pinned upstream code"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+
+[project.scripts]
+skillcheck = "skillcheck:main"
+
+[tool.setuptools]
+py-modules = ["skillcheck"]

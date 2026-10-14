@@ -1,0 +1,47 @@
+name: skillcheck
+description: Deterministic (no LLM) checks of claims and code samples in skill and docs markdown against pinned upstream code
+inputs:
+  skills-path:
+    description: Directory to scan for markdown
+    required: true
+  hooks-sol:
+    description: Path to v4-core src/libraries/Hooks.sol (ground truth for flag bits)
+    required: true
+  remappings:
+    description: Space-separated remapping files (profiles); an import passes if it resolves under any
+    required: true
+  project:
+    description: Foundry project directory (foundry.toml + lib/) for the compile check. Install forge first.
+    required: false
+    default: ''
+  compile:
+    description: Run the compile check ("true" or "false")
+    required: false
+    default: 'true'
+  exclude:
+    description: Space-separated directory names to skip
+    required: false
+    default: 'node_modules .git lib out cache dist'
+runs:
+  using: composite
+  steps:
+    - name: Run skillcheck
+      shell: bash
+      env:
+        SC_SKILLS: ${{ inputs.skills-path }}
+        SC_HOOKS: ${{ inputs.hooks-sol }}
+        SC_REMAP: ${{ inputs.remappings }}
+        SC_PROJECT: ${{ inputs.project }}
+        SC_COMPILE: ${{ inputs.compile }}
+        SC_EXCLUDE: ${{ inputs.exclude }}
+      run: |
+        set -euo pipefail
+        read -r -a remap_files <<< "$SC_REMAP"
+        read -r -a exclude_dirs <<< "$SC_EXCLUDE"
+        args=(--skills "$SC_SKILLS" --hooks-sol "$SC_HOOKS" --remappings "${remap_files[@]}" --exclude "${exclude_dirs[@]}")
+        if [ "$SC_COMPILE" = "true" ]; then
+          args+=(--project "$SC_PROJECT")
+        else
+          args+=(--no-compile)
+        fi
+        python3 "$GITHUB_ACTION_PATH/skillcheck.py" "${args[@]}"
