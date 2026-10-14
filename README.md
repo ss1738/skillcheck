@@ -9,7 +9,7 @@ It was written for Uniswap v4 hook documentation, where three kinds of drift kee
 | Check | What it does |
 |---|---|
 | `facts` | Finds claims like ``The `BEFORE_SWAP_RETURNS_DELTA` permission (bit 10)`` and compares them with the `uint160 internal constant X_FLAG = 1 << N` lines in v4-core's `Hooks.sol`. |
-| `imports` | Finds every `import` in ```` ```solidity ```` blocks and checks that the path resolves under at least one remapping profile you supply. |
+| `imports` | Finds every `import` in ```` ```solidity ```` blocks and checks that the path resolves under at least one remapping profile you supply. Imports whose prefix no profile maps (for example `@aave/...` when you only supplied Uniswap and OpenZeppelin profiles) are **not judged**, because there is no ground truth for them; add `--strict-imports` to flag them anyway. |
 | `compile` | Compiles every *complete* Solidity block (has `pragma solidity` and a `contract`, `library` or `interface`) in isolation with `forge build`. Fragments are not judged. |
 
 Quoted text is skipped: lines starting with `>`, lines inside ```` ```diff ```` blocks, and any line containing `skillcheck:ignore`. This is so a document can quote an error in order to report it.
@@ -19,7 +19,7 @@ Quoted text is skipped: lines starting with `>`, lines inside ```` ```diff ```` 
 ```
 skillcheck --skills <dir> --hooks-sol <path/to/Hooks.sol> \
            [--remappings <profile.txt> ...] \
-           [--project <foundry project dir> | --no-compile] [--exclude <dir> ...] [--json out.json]
+           [--project <foundry project dir> | --no-compile] [--strict-imports] [--exclude <dir> ...] [--json out.json]
 ```
 
 - `--remappings` is optional. Without it the import check is skipped (the other checks still run). A Foundry project's own `remappings.txt` works as a profile.
@@ -31,14 +31,14 @@ skillcheck --skills <dir> --hooks-sol <path/to/Hooks.sol> \
 Python 3.9+, standard library only (`forge` is needed only for the compile check).
 
 ```
-pipx install git+https://github.com/ss1738/skillcheck       # or: uvx --from git+https://github.com/ss1738/skillcheck skillcheck ...
+pipx install git+https://github.com/ss1738/skillcheck@v0.1.1       # or: uvx --from git+https://github.com/ss1738/skillcheck@v0.1.1 skillcheck ...
 ```
 
 Quick check of hook-permission bit claims in any docs folder, no other setup (`Hooks.sol` pinned to v4-core tag `v4.0.0`):
 
 ```
 curl -sLo Hooks.sol https://raw.githubusercontent.com/Uniswap/v4-core/e50237c43811bd9b526eff40f26772152a42daba/src/libraries/Hooks.sol
-uvx --from git+https://github.com/ss1738/skillcheck skillcheck --skills . --hooks-sol Hooks.sol --no-compile
+uvx --from git+https://github.com/ss1738/skillcheck@v0.1.1 skillcheck --skills . --hooks-sol Hooks.sol --no-compile
 ```
 
 **Exit codes:** `0` no findings. `1` findings. `2` usage or setup error (bad path, no flags found in `Hooks.sol`, `forge` missing): nothing was judged. This is covered by tests.
@@ -92,7 +92,7 @@ flags known: 14 | complete samples compiled: 6 | findings: {'facts': 1, 'imports
 
 ## Tests
 
-`python3 tests/test_skillcheck.py` (21 tests: red on known-bad input, green on known-good input, exit-code contract).
+`python3 tests/test_skillcheck.py` (23 tests: red on known-bad input, green on known-good input, exit-code contract).
 
 ## License
 

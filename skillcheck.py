@@ -4,13 +4,14 @@
 Deterministic, no LLM, no network. Checks:
   facts    "`HOOK_FLAG` permission (bit N)" claims vs the constants in Hooks.sol
   imports  every import path in ```solidity blocks resolves under at least one remapping profile
+           (imports whose prefix no profile maps are not judged unless --strict-imports)
   compile  every complete Solidity block (pragma + contract) compiles in isolation with forge
 
 Exit codes:  0 = no findings   1 = findings   2 = usage or setup error (nothing was judged)
 """
 import argparse, json, os, re, shutil, subprocess, sys, tempfile
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 FENCE = re.compile(r"```(?:solidity|sol)\n(.*?)```", re.S)
 IMPORT = re.compile(r'^\s*import\s+(?:[^"\';]*?\s+from\s+)?["\']([^"\']+)["\']\s*;', re.M)
@@ -97,13 +98,21 @@ def resolve(path, remaps, base):
     return os.path.exists(os.path.join(base, remaps[best] + path[len(best):]))
 
 
-def check_imports(skills, profiles, base=None, exclude=DEFAULT_EXCLUDE):
+def covered(path, profiles):
+    """True if some profile has a remapping prefix for this import (i.e. we have ground truth for it)."""
+    return any(path.startswith(k) for r, _ in profiles for k in r)
+
+
+def check_imports(skills, profiles, base=None, exclude=DEFAULT_EXCLUDE, strict=False):
     # profiles: list of (remaps, base). The old single-profile call (remaps dict, base) is accepted too.
+    # Imports whose prefix no profile maps are NOT judged (no ground truth), unless strict=True.
     if isinstance(profiles, dict):
         profiles = [(profiles, base)]
     out = []
     for f, line, code in blocks(skills, exclude):
         for imp in IMPORT.findall(code):
+            if not strict and not imp.startswith(".") and not covered(imp, profiles):
+                continue
             if not any(resolve(imp, r, b) for r, b in profiles):
                 out.append({"check": "imports", "file": f, "line": line, "detail": f"unresolved import {imp}"})
     return out
@@ -150,6 +159,8 @@ def build_parser():
                          "Without any, the import check is skipped (a Foundry project's own remappings.txt works)")
     ap.add_argument("--project", help="Foundry project dir (foundry.toml + lib/) used for the compile check")
     ap.add_argument("--no-compile", action="store_true", help="skip the compile check (no forge needed)")
+    ap.add_argument("--strict-imports", action="store_true",
+                    help="also flag imports whose prefix no remapping profile covers (default: not judged)")
     ap.add_argument("--exclude", nargs="*", default=list(DEFAULT_EXCLUDE), help="directory names to skip")
     ap.add_argument("--json", help="write findings to this file")
     ap.add_argument("--version", action="version", version=f"skillcheck {__version__}")
@@ -165,7 +176,7 @@ def run(a):
     profiles = [(load_remappings(p), os.path.dirname(os.path.abspath(p))) for p in a.remappings]
     findings = check_facts(a.skills, flags, a.exclude)
     if profiles:
-        findings += check_imports(a.skills, profiles, exclude=a.exclude)
+        findings += check_imports(a.skills, profiles, exclude=a.exclude, strict=a.strict_imports)
     else:
         print("note: no --remappings given; import check skipped", file=sys.stderr)
     compiled = None

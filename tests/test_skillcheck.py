@@ -85,19 +85,29 @@ class Imports(Base):
         self.md('```solidity\nimport {X} from "pkg/src/A.sol";\nimport "./local.sol";\n```')
         self.assertEqual(self.imports(), [])
 
-    def test_unmapped_prefix_flagged(self):
+    def test_unmapped_prefix_not_judged_by_default(self):
         self.md('```sol\nimport "unknown/B.sol";\n```')
+        self.assertEqual(self.imports(), [])
+
+    def test_unmapped_prefix_flagged_when_strict(self):
+        self.md('```sol\nimport "unknown/B.sol";\n```')
+        out = sc.check_imports(self.skills, sc.load_remappings(self.rm), self.td, strict=True)
+        self.assertEqual(len(out), 1)
+
+    def test_mapped_prefix_missing_file_still_flagged_by_default(self):
+        self.md('```sol\nimport "pkg/src/Moved.sol";\n```')
         self.assertEqual(len(self.imports()), 1)
 
     def test_second_profile_resolves_import(self):
         write(os.path.join(self.td, "lib2", "interfaces", "I.sol"), "// x")
         self.md('```solidity\nimport "core/interfaces/I.sol";\n```')
-        one = [(sc.load_remappings(self.rm), self.td)]
-        self.assertEqual(len(sc.check_imports(self.skills, one)), 1)
-        self.assertEqual(sc.check_imports(self.skills, one + [({"core/": "lib2/"}, self.td)]), [])
+        wrong = ({"core/": "lib/pkg/"}, self.td)    # maps the prefix, but the file is not there
+        right = ({"core/": "lib2/"}, self.td)
+        self.assertEqual(len(sc.check_imports(self.skills, [wrong])), 1)
+        self.assertEqual(sc.check_imports(self.skills, [wrong, right]), [])
 
     def test_excluded_directory_is_skipped(self):
-        write(os.path.join(self.skills, "lib", "vendored.md"), '```solidity\nimport "unknown/B.sol";\n```')
+        write(os.path.join(self.skills, "lib", "vendored.md"), '```solidity\nimport "pkg/src/Moved.sol";\n```')
         self.assertEqual(self.imports(), [])  # 'lib' is excluded by default
         self.assertEqual(len(sc.check_imports(self.skills, sc.load_remappings(self.rm), self.td, exclude=())), 1)
 
