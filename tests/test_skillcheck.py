@@ -85,6 +85,12 @@ class Imports(Base):
         self.md('```solidity\nimport {X} from "pkg/src/A.sol";\nimport "./local.sol";\n```')
         self.assertEqual(self.imports(), [])
 
+    def test_import_finding_reports_the_import_line(self):
+        self.md('intro\n\n```solidity\n// SPDX\npragma solidity ^0.8.24;\nimport {X} from "pkg/src/Gone.sol";\ncontract C {}\n```\n')
+        out = self.imports()
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["line"], 6)  # fence is on line 3; the import is on line 6
+
     def test_unmapped_prefix_not_judged_by_default(self):
         self.md('```sol\nimport "unknown/B.sol";\n```')
         self.assertEqual(self.imports(), [])

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skillcheck"
-version = "0.1.1"
+version = "0.1.2"
 description = "Deterministic (no LLM) checks of claims and code samples in agent-skill and docs markdown against pinned upstream code"
 readme = "README.md"
 requires-python = ">=3.9"

@@ -11,7 +11,7 @@ Exit codes:  0 = no findings   1 = findings   2 = usage or setup error (nothing 
 """
 import argparse, json, os, re, shutil, subprocess, sys, tempfile
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 FENCE = re.compile(r"```(?:solidity|sol)\n(.*?)```", re.S)
 IMPORT = re.compile(r'^\s*import\s+(?:[^"\';]*?\s+from\s+)?["\']([^"\']+)["\']\s*;', re.M)
@@ -80,6 +80,7 @@ def check_facts(skills, flags, exclude=DEFAULT_EXCLUDE):
 
 
 def blocks(skills, exclude=DEFAULT_EXCLUDE):
+    # yields (file, line of the opening fence, code). Code starts on the line after the fence.
     for f in md_files(skills, exclude):
         t = read(f)
         for m in FENCE.finditer(t):
@@ -109,11 +110,13 @@ def check_imports(skills, profiles, base=None, exclude=DEFAULT_EXCLUDE, strict=F
     if isinstance(profiles, dict):
         profiles = [(profiles, base)]
     out = []
-    for f, line, code in blocks(skills, exclude):
-        for imp in IMPORT.findall(code):
+    for f, fence_line, code in blocks(skills, exclude):
+        for m in IMPORT.finditer(code):
+            imp = m.group(1)
             if not strict and not imp.startswith(".") and not covered(imp, profiles):
                 continue
             if not any(resolve(imp, r, b) for r, b in profiles):
+                line = fence_line + 1 + code[:m.start(1)].count("\n")  # the line holding the import path
                 out.append({"check": "imports", "file": f, "line": line, "detail": f"unresolved import {imp}"})
     return out
 
