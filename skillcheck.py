@@ -11,7 +11,7 @@ Exit codes:  0 = no findings   1 = findings   2 = usage or setup error (nothing 
 """
 import argparse, json, os, re, shutil, subprocess, sys, tempfile
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 FENCE = re.compile(r"```(?:solidity|sol)\n(.*?)```", re.S)
 IMPORT = re.compile(r'^\s*import\s+(?:[^"\';]*?\s+from\s+)?["\']([^"\']+)["\']\s*;', re.M)
@@ -19,6 +19,19 @@ CLAIM = re.compile(r"`([A-Z][A-Z0-9_]+?)(?:_FLAG)?`\s+(?:permission\s+)?\(bit (\
 CONST = re.compile(r"uint160\s+internal\s+constant\s+([A-Z0-9_]+?)_FLAG\s*=\s*1\s*<<\s*(\d+)\s*;")
 DEFAULT_EXCLUDE = ("node_modules", ".git", "lib", "out", "cache", "dist")
 MARKDOWN_SUFFIXES = (".md", ".mdx")
+# A sample the author elided cannot be judged by compiling it: the compiler
+# reports the missing code, not a defect in the docs. These match only lines
+# that are nothing but an ellipsis, or a comment standing in for omitted code.
+ELISION = (
+    re.compile(r"^\s*\.\.\.\s*;?\s*$"),                 # bare `...` statement
+    re.compile(r"^\s*//\s*\.\.\.\s*$"),                 # `// ...`
+    re.compile(r"^\s*/\*\s*\.\.\.\s*\*/\s*$"),        # `/* ... */`
+    re.compile(r"^\s*//.*\b(?:import statements|rest of the|omitted for brevity"
+               r"|constructor, state)\b", re.I),
+)
+# forge refuses before compiling when no installed solc matches the pragma.
+# That is a property of the fixture, not of the sample.
+PRAGMA_MISMATCH = re.compile(r"invalid solc version|No solc version exists that matches")
 COMPILE_TIMEOUT_S = 300
 
 
@@ -125,15 +138,66 @@ def check_imports(skills, profiles, base=None, exclude=DEFAULT_EXCLUDE, strict=F
     return out
 
 
-def check_compile(skills, project, exclude=DEFAULT_EXCLUDE):
+UNRESOLVED = re.compile(r'Unable to resolve imports:\s*((?:\s*"[^"]+"\s+in\s+"[^"]+"\s*)+)')
+QUOTED_IMPORT = re.compile(r'"([^"]+)"\s+in\s+"')
+
+
+def compile_detail(text, tmpdir):
+    """One actionable line. Names the unresolved imports when that is the cause,
+    and never leaks the local fixture path into a finding."""
+    m = UNRESOLVED.search(text)
+    if m:
+        paths = QUOTED_IMPORT.findall(m.group(1))
+        if paths:
+            shown = ", ".join(paths[:3]) + (f" (+{len(paths) - 3} more)" if len(paths) > 3 else "")
+            return f"unresolved import in sample: {shown}"
+    m = re.search(r"(Error \(\d+\): [^\n]*)", text)
+    if m:
+        return re.sub(re.escape(tmpdir), "<sample>", m.group(1))[:200]
+    return "compile failed"
+
+
+def elided(code):
+    """Line number of the first elision marker, else None."""
+    for i, line in enumerate(code.splitlines(), 1):
+        if any(p.match(line) for p in ELISION):
+            return i
+    return None
+
+
+def unjudgeable_imports(code, profiles):
+    """Imports we have no ground truth for, so a failed compile proves nothing:
+    paths relative to the reader's own project, and prefixes no supplied
+    remapping profile maps. Mirrors the rule check_imports already applies."""
+    bad = []
+    for m in IMPORT.finditer(code):
+        imp = m.group(1)
+        if imp.startswith("."):
+            bad.append(imp)
+        elif profiles and not covered(imp, profiles):
+            bad.append(imp)
+    return bad
+
+
+def check_compile(skills, project, exclude=DEFAULT_EXCLUDE, profiles=()):
     if shutil.which("forge") is None:
         raise SetupError("forge not found on PATH (needed for the compile check; use --no-compile to skip)")
     for need in ("foundry.toml", "lib"):
         if not os.path.exists(os.path.join(project, need)):
             raise SetupError(f"--project must contain {need}: {project}")
-    out, n = [], 0
+    out, n, skipped = [], 0, {"fragment": [], "pragma": [], "deps": []}
     for f, line, code in blocks(skills, exclude):
         if not ("pragma solidity" in code and re.search(r"\b(contract|library|interface)\s+\w+", code)):
+            continue
+        at = elided(code)
+        if at is not None:
+            skipped["fragment"].append({"file": f, "line": line, "detail": f"elided at sample line {at}"})
+            continue
+        outside = unjudgeable_imports(code, profiles)
+        if outside:
+            shown = ", ".join(outside[:3]) + (f" (+{len(outside) - 3} more)" if len(outside) > 3 else "")
+            skipped["deps"].append({"file": f, "line": line,
+                                    "detail": f"imports outside the fixture: {shown}"})
             continue
         n += 1
         with tempfile.TemporaryDirectory() as td:
@@ -149,11 +213,15 @@ def check_compile(skills, project, exclude=DEFAULT_EXCLUDE):
                 out.append({"check": "compile", "file": f, "line": line, "detail": f"compile timed out after {COMPILE_TIMEOUT_S}s"})
                 continue
             text = p.stdout + p.stderr
+            if PRAGMA_MISMATCH.search(text):
+                n -= 1
+                skipped["pragma"].append({"file": f, "line": line,
+                                          "detail": "sample's solc pragma is not satisfiable by --project"})
+                continue
             if "Compiler run successful" not in text:
-                msgs = re.findall(r"(Error \(\d+\): [^\n]*|Unable to resolve imports:[^\n]*)", text)
                 out.append({"check": "compile", "file": f, "line": line,
-                            "detail": (msgs[0] if msgs else "compile failed")[:200]})
-    return out, n
+                            "detail": compile_detail(text, td)})
+    return out, n, skipped
 
 
 def build_parser():
@@ -173,6 +241,8 @@ def build_parser():
     ap.add_argument("--strict-imports", action="store_true",
                     help="also flag imports whose prefix no remapping profile covers (default: not judged)")
     ap.add_argument("--exclude", nargs="*", default=list(DEFAULT_EXCLUDE), help="directory names to skip")
+    ap.add_argument("--report-skipped", action="store_true",
+                    help="list samples that were not judged (elided code, or a solc pragma --project cannot satisfy)")
     ap.add_argument("--json", help="write findings to this file")
     ap.add_argument("--version", action="version", version=f"skillcheck {__version__}")
     return ap
@@ -190,17 +260,24 @@ def run(a):
         findings += check_imports(a.skills, profiles, exclude=a.exclude, strict=a.strict_imports)
     else:
         print("note: no --remappings given; import check skipped", file=sys.stderr)
-    compiled = None
+    compiled, skipped = None, {"fragment": [], "pragma": [], "deps": []}
     if not a.no_compile:
-        cf, compiled = check_compile(a.skills, a.project, a.exclude)
+        cf, compiled, skipped = check_compile(a.skills, a.project, a.exclude, profiles)
         findings += cf
     for x in findings:
         print(f"[{x['check']}] {os.path.relpath(x['file'], a.skills)}:{x['line']}  {x['detail']}")
+    if a.report_skipped:
+        for kind in ("fragment", "pragma", "deps"):
+            for x in skipped[kind]:
+                print(f"[skipped:{kind}] {os.path.relpath(x['file'], a.skills)}:{x['line']}  {x['detail']}")
     summary = {c: sum(1 for x in findings if x["check"] == c) for c in ("facts", "imports", "compile")}
-    print(f"\nflags known: {len(flags)} | complete samples compiled: {compiled} | findings: {summary}")
+    nskip = {k: len(v) for k, v in skipped.items()}
+    print(f"\nflags known: {len(flags)} | complete samples compiled: {compiled} "
+          f"| not judged: {nskip} | findings: {summary}")
     if a.json:
         with open(a.json, "w") as fh:
-            json.dump({"version": __version__, "summary": summary, "findings": findings}, fh, indent=1)
+            json.dump({"version": __version__, "summary": summary,
+                       "not_judged": skipped, "findings": findings}, fh, indent=1)
     return 1 if findings else 0
 
 

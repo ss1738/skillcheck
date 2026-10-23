@@ -232,5 +232,35 @@ class RepeatedRemappingsFlag(Base):
         self.assertEqual(r.returncode, 0, "profile A was dropped by the repeated flag:\n" + r.stdout + r.stderr)
 
 
+
+class NotJudged(Base):
+    """Elided samples and unsatisfiable pragmas must not be reported as findings."""
+
+    GOOD = ('```solidity\n// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\n'
+            'contract A {\n    uint256 public x;\n}\n```\n')
+
+    def _run(self, doc, extra=()):
+        d = tempfile.mkdtemp()
+        write(os.path.join(d, "s", "doc.md"), doc)
+        hooks = os.path.join(d, "Hooks.sol"); write(hooks, HOOKS)
+        return subprocess.run(CLI + ["--skills", os.path.join(d, "s"), "--hooks-sol", hooks,
+                                     "--no-compile", *extra], capture_output=True, text=True)
+
+    def test_elided_detector_matches_real_shapes(self):
+        sys.path.insert(0, ROOT)
+        self.assertEqual(sc.elided("contract A {\n    ...\n}"), 2)
+        self.assertEqual(sc.elided("contract A {\n    // ...\n}"), 2)
+        self.assertEqual(sc.elided("// Import statements for a hook\ncontract A {}"), 1)
+        self.assertEqual(sc.elided("contract A {\n    // constructor, state, interface, etc\n}"), 2)
+
+    def test_decorative_comment_is_not_elision(self):
+        # async-swap.mdx has `// ------------------- //`; it must not read as elided
+        self.assertIsNone(sc.elided("contract A {\n    // ------------------- //\n}"))
+        self.assertIsNone(sc.elided("contract A {\n    // step 1. do the thing\n}"))
+
+    def test_ellipsis_inside_a_string_is_not_elision(self):
+        self.assertIsNone(sc.elided('contract A { string s = "..."; }'))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

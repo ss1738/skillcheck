@@ -10,7 +10,19 @@ It was written for Uniswap v4 hook documentation, where three kinds of drift kee
 |---|---|
 | `facts` | Finds claims like ``The `BEFORE_SWAP_RETURNS_DELTA` permission (bit 10)`` and compares them with the `uint160 internal constant X_FLAG = 1 << N` lines in v4-core's `Hooks.sol`. |
 | `imports` | Finds every `import` in ```` ```solidity ```` blocks and checks that the path resolves under at least one remapping profile you supply. Imports whose prefix no profile maps (for example `@aave/...` when you only supplied Uniswap and OpenZeppelin profiles) are **not judged**, because there is no ground truth for them; add `--strict-imports` to flag them anyway. |
-| `compile` | Compiles every *complete* Solidity block (has `pragma solidity` and a `contract`, `library` or `interface`) in isolation with `forge build`. Fragments are not judged. |
+| `compile` | Compiles every *complete* Solidity block (has `pragma solidity` and a `contract`, `library` or `interface`) in isolation with `forge build`. |
+
+### What is not judged
+
+A sample is only compiled when a failure would actually mean something. These are skipped and counted separately, never reported as findings (`--report-skipped` lists them):
+
+| Skipped as | Why |
+|---|---|
+| `fragment` | The sample elides code (`...`, `// ...`, `// Import statements for a hook`). The compiler would report the missing lines, not a defect. |
+| `deps` | It imports paths relative to the reader's own project (`../src/MyHook.sol`) or prefixes no supplied remapping profile covers. Same ground-truth rule the `imports` check uses. |
+| `pragma` | `--project` has no solc matching the sample's pragma. That is a property of your fixture. |
+
+Measured on `Uniswap/docs` `content/protocols/v4` at `1c7597d7`: this moved the compile check from 19 findings (8 real, 11 noise) to 8 findings, all the same real cause.
 
 Quoted text is skipped: lines starting with `>`, lines inside ```` ```diff ```` blocks, and any line containing `skillcheck:ignore`. This is so a document can quote an error in order to report it.
 
