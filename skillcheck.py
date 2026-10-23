@@ -11,13 +11,14 @@ Exit codes:  0 = no findings   1 = findings   2 = usage or setup error (nothing 
 """
 import argparse, json, os, re, shutil, subprocess, sys, tempfile
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 FENCE = re.compile(r"```(?:solidity|sol)\n(.*?)```", re.S)
 IMPORT = re.compile(r'^\s*import\s+(?:[^"\';]*?\s+from\s+)?["\']([^"\']+)["\']\s*;', re.M)
 CLAIM = re.compile(r"`([A-Z][A-Z0-9_]+?)(?:_FLAG)?`\s+(?:permission\s+)?\(bit (\d+)\)")
 CONST = re.compile(r"uint160\s+internal\s+constant\s+([A-Z0-9_]+?)_FLAG\s*=\s*1\s*<<\s*(\d+)\s*;")
 DEFAULT_EXCLUDE = ("node_modules", ".git", "lib", "out", "cache", "dist")
+MARKDOWN_SUFFIXES = (".md", ".mdx")
 COMPILE_TIMEOUT_S = 300
 
 
@@ -31,10 +32,13 @@ def read(path):
 
 
 def md_files(root, exclude=DEFAULT_EXCLUDE):
+    # .mdx too: Docusaurus/Nextra docs sites (Uniswap/docs among them) are
+    # almost entirely .mdx, and skipping it made whole doc trees silently
+    # unjudged -- a clean run that had checked nothing.
     for d, dirs, fs in os.walk(root):
         dirs[:] = sorted(x for x in dirs if x not in exclude)
         for f in sorted(fs):
-            if f.endswith(".md"):
+            if f.endswith(MARKDOWN_SUFFIXES):
                 yield os.path.join(d, f)
 
 
@@ -157,7 +161,11 @@ def build_parser():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--skills", required=True, help="directory to scan for markdown")
     ap.add_argument("--hooks-sol", required=True, help="path to v4-core src/libraries/Hooks.sol (ground truth)")
-    ap.add_argument("--remappings", nargs="*", default=[],
+    # action="extend" so a repeated flag accumulates. With plain nargs="*" a
+    # second --remappings silently REPLACED the first, so only the last profile
+    # was consulted and imports the earlier profile covered were reported
+    # unresolved -- a false positive that looks exactly like real drift.
+    ap.add_argument("--remappings", nargs="*", action="extend", default=[],
                     help="one or more remapping files (profiles); an import passes if it resolves under any. "
                          "Without any, the import check is skipped (a Foundry project's own remappings.txt works)")
     ap.add_argument("--project", help="Foundry project dir (foundry.toml + lib/) used for the compile check")

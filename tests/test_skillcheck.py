@@ -174,5 +174,63 @@ class ExitCodes(Base):
         self.assertIn(sc.__version__, p.stdout)
 
 
+
+class MdxDiscovery(Base):
+    """.mdx must be judged: Uniswap/docs and most docs sites are .mdx, and
+    skipping it produced a clean run that had checked nothing."""
+
+    def test_mdx_file_is_checked_for_facts(self):
+        d = tempfile.mkdtemp()
+        write(os.path.join(d, "skills", "a.mdx"),
+              "The `BEFORE_SWAP_RETURNS_DELTA` permission (bit 10) is set.\n")
+        hooks = os.path.join(d, "Hooks.sol")
+        write(hooks, HOOKS)
+        r = subprocess.run(CLI + ["--skills", os.path.join(d, "skills"),
+                                  "--hooks-sol", hooks, "--no-compile"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("a.mdx", r.stdout)
+
+    def test_md_and_mdx_both_discovered(self):
+        d = tempfile.mkdtemp()
+        write(os.path.join(d, "s", "x.md"), "`BEFORE_SWAP` permission (bit 99)\n")
+        write(os.path.join(d, "s", "y.mdx"), "`BEFORE_SWAP` permission (bit 98)\n")
+        hooks = os.path.join(d, "Hooks.sol"); write(hooks, HOOKS)
+        r = subprocess.run(CLI + ["--skills", os.path.join(d, "s"),
+                                  "--hooks-sol", hooks, "--no-compile"],
+                           capture_output=True, text=True)
+        self.assertIn("x.md", r.stdout)
+        self.assertIn("y.mdx", r.stdout)
+
+    def test_unrelated_suffix_ignored(self):
+        d = tempfile.mkdtemp()
+        write(os.path.join(d, "s", "z.mdxx"), "`BEFORE_SWAP` permission (bit 99)\n")
+        hooks = os.path.join(d, "Hooks.sol"); write(hooks, HOOKS)
+        r = subprocess.run(CLI + ["--skills", os.path.join(d, "s"),
+                                  "--hooks-sol", hooks, "--no-compile"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
+
+class RepeatedRemappingsFlag(Base):
+    """A repeated --remappings must accumulate, not replace."""
+
+    def test_repeated_flag_accumulates_profiles(self):
+        d = tempfile.mkdtemp()
+        # ground truth lives under profile A only
+        write(os.path.join(d, "a", "lib", "pkg", "F.sol"), "// x\n")
+        write(os.path.join(d, "a", "p.txt"), "pkg/=lib/pkg/\n")
+        write(os.path.join(d, "b", "q.txt"), "other/=lib/other/\n")
+        write(os.path.join(d, "s", "doc.md"),
+              "```solidity\nimport \"pkg/F.sol\";\n```\n")
+        hooks = os.path.join(d, "Hooks.sol"); write(hooks, HOOKS)
+        r = subprocess.run(CLI + ["--skills", os.path.join(d, "s"), "--hooks-sol", hooks,
+                                  "--remappings", os.path.join(d, "a", "p.txt"),
+                                  "--remappings", os.path.join(d, "b", "q.txt"),
+                                  "--no-compile"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, "profile A was dropped by the repeated flag:\n" + r.stdout + r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
